@@ -8,7 +8,7 @@
 #include "Utilities.hpp"
 
 
-// Loads the Extractor database at the given path.
+// Loads the SRSC database at the given path.
 Extractor::Extractor(const std::string& file_path) : file_path(file_path)
 {
 	std::string full_file_path{"Resources\\"+file_path};
@@ -202,6 +202,9 @@ std::vector<uint8_t> Extractor::extract_default()
 // Extracts the current entry as a string.
 void Extractor::extract_string()
 {
+	// Get the string length.
+	uint32_t length{binary_read<uint32_t>()};
+
 	// Read the data as a UTF-16 string.
 	std::wstring utf16_string;
 	for(uint32_t index{}; index < entry.data_size; index += sizeof(wchar_t))
@@ -210,9 +213,6 @@ void Extractor::extract_string()
 		input_stream.read(reinterpret_cast<char*>(&character), sizeof(wchar_t));
 		utf16_string += character;
 	}
-
-	// Erase the first character.
-	utf16_string.erase(0, 1);
 
 	// Convert to UTF-8.
 	std::string utf8_string{Utilities::utf16_to_utf8(utf16_string).c_str()};

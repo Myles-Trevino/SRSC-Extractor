@@ -8,8 +8,12 @@ Extracts the .XDU (text), .SDU (sound), and .TDU (texture) SRSC databases found 
 - Run the program and the files in the databases listed below will be extracted.
 
 
+## Databases
+Each SRSC database starts with a header. The header contains the following information in order: file signature (4 bytes), SRSC version (2 bytes), entry list offset (4 bytes), and entry count (2 bytes). After the header, there is a list of entries starting at the entry list offset. Each entry has its own header and data. The information in the entry headers is as follows: type (2 bytes), id (2 bytes), group id (2 bytes), data offset (4 bytes), and data size (4 bytes). Each database starts with a "Database Information" entry which contains information such as the database type. The types of the entries following the "Database Information" entry depends on the type of the database. The currently supported database types are described below.
+
+
 ## .XDU - Text Database
-Contains "Text" data entries which are plain UTF-16 encoded strings.
+Contains "Text" data entries. The first two bytes is the size of the string. This is immediately followed by UTF-16 string data. The extractor converts these entries to plain UTF-8 encoded strings.
 
 
 ### Locations
