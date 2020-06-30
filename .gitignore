@@ -1,0 +1,9 @@
+.vs
+Binaries
+Include
+Intermediate
+Libraries
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
