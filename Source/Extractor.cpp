@@ -203,7 +203,7 @@ std::vector<uint8_t> Extractor::extract_default()
 void Extractor::extract_string()
 {
 	// Get the string length.
-	uint32_t length{binary_read<uint32_t>()};
+	uint16_t length{binary_read<uint16_t>()};
 
 	// Read the data as a UTF-16 string.
 	std::wstring utf16_string;
