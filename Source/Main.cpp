@@ -6,107 +6,130 @@
 
 
 #include <iostream>
+#include <filesystem>
+#include <thread>
+#include <mutex>
+#include <queue>
 
+#include "Utilities.hpp"
 #include "Extractor.hpp"
 
 
-std::vector<std::string> file_paths
+std::vector<std::string> database_paths;
+std::vector<std::thread> threads;
+std::queue<std::thread::id> finished_thread_ids;
+std::mutex completion_mutex;
+int completed_count;
+int error_count;
+
+
+void thread_error(const std::string& database_path, const std::string& message)
 {
-	// XDUs.
-	"COMMON\\Interface\\Interface.xdu",
-	"COMMON\\NPCs\\NPCs.xdu",
-	"COMMON\\Resources\\Resources.xdu",
-	"COMMON\\System\\System.xdu",
-	"LEVELS\\0 Prelude Docks\\0 Prelude Docks.xdu",
-	"LEVELS\\1 PrisonDeathRow\\1 PrisonDeathRow.xdu",
-	"LEVELS\\2 Cellblocks\\2 Cellblocks.xdu",
-	"LEVELS\\3 YardCellBlock\\3 YardCellBlock.xdu",
-	"LEVELS\\4 Quarry\\4 Quarry.xdu",
-	"LEVELS\\5 Asylum\\5 Asylum.xdu",
-	"LEVELS\\6 Woods\\6 Woods.xdu",
-	"LEVELS\\8 Bluff\\8 Bluff.xdu",
-	"LEVELS\\9 Lighthouse\\9 Lighthouse.xdu",
-	"LEVELS\\10 Docks\\10 Docks.xdu",
-
-	// SDUs.
-	"COMMON\\FX\\FX.sdu",
-	"COMMON\\Interface\\Interface.sdu",
-	"COMMON\\NPCs\\NPCs.sdu",
-	"COMMON\\Resources\\Resources.sdu",
-	"COMMON\\System\\System.sdu",
-	"LEVELS\\0 Prelude Docks\\0 Prelude Docks.sdu",
-	"LEVELS\\1 PrisonDeathRow\\1 PrisonDeathRow.sdu",
-	"LEVELS\\2 Cellblocks\\2 Cellblocks.sdu",
-	"LEVELS\\3 YardCellBlock\\3 YardCellBlock.sdu",
-	"LEVELS\\4 Quarry\\4 Quarry.sdu",
-	"LEVELS\\5 Asylum\\5 Asylum.sdu",
-	"LEVELS\\6 Woods\\6 Woods.sdu",
-	"LEVELS\\8 Bluff\\8 Bluff.sdu",
-	"LEVELS\\9 Lighthouse\\9 Lighthouse.sdu",
-	"LEVELS\\10 Docks\\10 Docks.sdu",
-	"World Common\\World Common\\World Common.sdu",
-
-	// TDUs.
-	"COMMON\\FX\\FX.tdu",
-	"COMMON\\Interface\\Interface.tdu",
-	"COMMON\\NPCs\\NPCs.tdu",
-	"COMMON\\Resources\\Resources.tdu",
-	"COMMON\\System\\System.tdu",
-	"LEVELS\\0 Prelude Docks\\0 Prelude Docks.tdu",
-	"LEVELS\\0 Prelude Docks\\0 Prelude Docks_level.tdu",
-	"LEVELS\\1 PrisonDeathRow\\1 PrisonDeathRow.tdu",
-	"LEVELS\\1 PrisonDeathRow\\1a PrisonDeathRow_level.tdu",
-	"LEVELS\\1 PrisonDeathRow\\1b PrisonDeathRow_level.tdu",
-	"LEVELS\\1 PrisonDeathRow\\1c PrisonDeathRow_level.tdu",
-	"LEVELS\\2 Cellblocks\\2 Cellblocks.tdu",
-	"LEVELS\\2 Cellblocks\\2 Cellblocks_level.tdu",
-	"LEVELS\\3 YardCellBlock\\3 YardCellBlock.tdu",
-	"LEVELS\\3 YardCellBlock\\3a YardCellBlock_level.tdu",
-	"LEVELS\\3 YardCellBlock\\3b YardCellBlock_level.tdu",
-	"LEVELS\\4 Quarry\\4 Quarry.tdu",
-	"LEVELS\\4 Quarry\\4a Quarry_level.tdu",
-	"LEVELS\\4 Quarry\\4b Quarry_level.tdu",
-	"LEVELS\\5 Asylum\\5 Asylum.tdu",
-	"LEVELS\\5 Asylum\\5a Asylum_level.tdu",
-	"LEVELS\\5 Asylum\\5b Asylum_level.tdu",
-	"LEVELS\\6 Woods\\6 Woods.tdu",
-	"LEVELS\\6 Woods\\6a Woods_level.tdu",
-	"LEVELS\\6 Woods\\6b Woods_level.tdu",
-	"LEVELS\\7 ReturnToPrison\\7 ReturnToPrison_level.tdu",
-	"LEVELS\\8 Bluff\\8 Bluff.tdu",
-	"LEVELS\\8 Bluff\\8a Bluff_level.tdu",
-	"LEVELS\\8 Bluff\\8b Bluff_level.tdu",
-	"LEVELS\\9 Lighthouse\\9 Lighthouse.tdu",
-	"LEVELS\\9 Lighthouse\\9 Lighthouse_level.tdu",
-	"LEVELS\\10 Docks\\10 Docks.tdu",
-	"LEVELS\\10 Docks\\10 Docks_level.tdu",
-	"World Common\\Asylum Common\\Asylum Common.tdu",
-	"World Common\\Landscape Textures\\Landscape Textures.tdu",
-	"World Common\\Outdoor Common\\Outdoor Common.tdu",
-	"World Common\\Prison Common\\Prison Common.tdu",
-	"World Common\\World Common\\World Common.tdu",
-};
+	std::lock_guard<std::mutex> completion_mutex_lock{completion_mutex};
+	std::cout<<"Error extracting \""<<database_path<<"\": "<<message<<'\n';
+	++error_count;
+}
 
 
+// Thread function.
+void thread_function(std::string database_path)
+{
+	try
+	{
+		// Extract the database.
+		Extractor extractor{database_path};
+		extractor.extract();
+
+		std::lock_guard<std::mutex> completion_mutex_lock{completion_mutex};
+
+		// Update the completion status.
+		++completed_count;
+		std::cout<<"\rCompleted "<<completed_count<<" of "<<database_paths.size()
+			<<" ("<<static_cast<int>(static_cast<float>(completed_count)/
+			database_paths.size()*100+.5f)<<"%).      ";
+	}
+
+	// Handle errors.
+	catch(const std::exception& exception){ thread_error(database_path, exception.what()); }
+	catch(...){ thread_error(database_path, "Unhandled exception."); }
+
+	// Add the thread ID to the finished queue.
+	std::lock_guard<std::mutex> completion_mutex_lock{completion_mutex};
+	finished_thread_ids.push(std::this_thread::get_id());
+}
+
+
+// Main.
 int main()
 {
 	try
 	{
-		// For each file path...
-		for(int index{}; index < file_paths.size(); ++index)
+		std::cout<<"Searching for extractable databases (.SDU, .TDU, or .XDU files)...\n";
+
+		// Check that the resources folder exists.
+		if(!std::filesystem::exists("Resources"))
+			throw std::runtime_error{"Could not find the resources folder. Please create a "
+				"folder named \"Resources\" next to this executable containing the game "
+				"resources you would like to extract ."};
+
+		// Load the database paths.
+		for(const std::filesystem::directory_entry& iterator :
+			std::filesystem::recursive_directory_iterator("Resources"))
 		{
-			std::string file_path{file_paths[index]};
+			if(!iterator.is_regular_file() || !iterator.path().has_extension()) continue;
 
-			// Extract the file.
-			Extractor extractor{file_path};
-			extractor.extract();
+			std::string extension{Utilities::to_uppercase(
+				iterator.path().extension().u8string())};
 
-			// Print the progress.
-			std::cout<<index+1<<" of "<<file_paths.size()<<
-				" database extractions complete.\n\n---\n\n";
+			if(extension != ".SDU" && extension != ".TDU" && extension != ".XDU") continue;
+			database_paths.emplace_back(iterator.path().u8string());
 		}
 
-		std::cout<<"Finished.";
+		if(database_paths.empty()) throw std::runtime_error{"No extractable databases "
+			"(.SDU, .TDU, or .XDU) were found in the resources folder."};
+		std::cout<<"Found "<<database_paths.size()<<" extractable databases.\n\n---\n\n";
+
+		// Extract.
+		std::cout<<"Extracting...\n";
+		unsigned thread_count{std::thread::hardware_concurrency()/2};
+
+		unsigned file_paths_offset{};
+		for(const std::string& path : database_paths)
+		{
+			// If all threads are currently being used...
+			if(threads.size() >= thread_count)
+			{
+				// Wait for a thread to finish.
+				while(finished_thread_ids.size() <= 0)
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+				// Erase the finished thread.
+				std::thread::id id{finished_thread_ids.front()};
+				finished_thread_ids.pop();
+
+				for(int index{}; index < threads.size(); ++index)
+					if(threads[index].get_id() == id)
+					{
+						threads[index].detach();
+						threads.erase(threads.begin()+index);
+					}
+			}
+
+			// Extract the database on a separate thread.
+			threads.emplace_back(thread_function, path);
+		}
+
+		// Join the threads that are still running.
+		for(std::thread& thread : threads) thread.join();
+		std::cout<<"\nErrors: "<<error_count<<".\n\n---\n\nFinished.\n";
 	}
-	catch(std::runtime_error& error){ std::cout<<"\n\nFatal Error: "<<error.what(); }
+
+	// Handle errors.
+	catch(std::runtime_error& error){ std::cout<<"\n\nFatal Error: "<<error.what()<<'\n'; }
+	catch(...){ std::cout<<"\n\nFatal unhandled exeption.\n"; }
+
+	// Press enter to exit.
+	std::string line;
+	std::cout<<"Press enter to exit...\n";
+	std::getline(std::cin, line);
 }

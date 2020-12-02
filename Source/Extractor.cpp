@@ -8,9 +8,12 @@
 #include "Extractor.hpp"
 
 #include <iostream>
+#include <filesystem>
+#include <thread>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 #include <S3TC/s3tc.h>
+#include <Windows.h>
 
 #include "Utilities.hpp"
 
@@ -18,11 +21,8 @@
 // Loads the SRSC database at the given path.
 Extractor::Extractor(const std::string& file_path) : file_path(file_path)
 {
-	std::string full_file_path{"Resources\\"+file_path};
-	std::cout<<"Loading database \""<<full_file_path<<"\"...\n";
-
 	// Open the input stream.
-	input_stream.open(full_file_path.c_str(), std::ios::in|std::ios::binary);
+	input_stream.open(file_path.c_str(), std::ios::in|std::ios::binary);
 	if(!input_stream) throw std::runtime_error{"Failed to open the file."};
 
 	// Get the extension.
@@ -65,9 +65,6 @@ Extractor::Extractor(const std::string& file_path) : file_path(file_path)
 		entry.data_size = binary_read<uint32_t>();
 		entries[index] = entry;
 	}
-
-	// Print the type.
-	std::cout<<"Type: "<<extension<<" - "<<type<<"\nLoaded.\n\n";
 }
 
 
@@ -125,11 +122,10 @@ std::string Extractor::get_entry_type_extension(Entry_Type type)
 // Extracts the files from the loaded database.
 void Extractor::extract()
 {
-	std::cout<<"Extracting...\n";
-
 	// Create the output directory.
 	std::string output_folder{"Extraction\\"+file_path};
-	system(("if not exist \""+output_folder+"\" mkdir \""+output_folder+'"').c_str());
+	if(!std::filesystem::exists(output_folder))
+		std::filesystem::create_directories(output_folder);
 
 	// For each entry...
 	int extracted_count{};
@@ -137,18 +133,13 @@ void Extractor::extract()
 	{
 		entry = entries[index];
 
-		// Print the progress.
-		std::string entry_type_string{get_entry_type_string(entry.type)};
-		std::cout<<"\rEntry "<<index+1<<" of "<<entries.size()<<": "<<
-			Utilities::get_size_string(entry.data_size)<<" "<<entry_type_string<<
-			"                 ";
-
 		// Get the extension.
 		std::string extension{get_entry_type_extension(entry.type)};
 		if(extension == "Unsupported") throw std::runtime_error{"Failed to extract an entry."
 			" Unsupported type "+std::to_string(static_cast<uint16_t>(entry.type))+'.'};
 
 		// Generate the output path.
+		std::string entry_type_string{get_entry_type_string(entry.type)};
 		output_path = output_folder+"\\Entry "+std::to_string(index+1)+
 			" ("+entry_type_string+")"+extension;
 
@@ -167,8 +158,6 @@ void Extractor::extract()
 
 		++extracted_count;
 	}
-
-	std::cout<<"\nExtracted.\n\n";
 }
 
 
@@ -258,11 +247,35 @@ void Extractor::extract_sound()
 	std::string wav_output_path{output_path.substr(
 		0, output_path.find_last_of('.'))+".wav"};
 
-	// Convert the raw PCM to WAV and delete the raw PCM file.
-	system(("ffmpeg -nostats -hide_banner -loglevel panic -y -f s"+
-		std::to_string(bit_depth)+"le -ac "+std::to_string(channel_count)+
-		" -ar "+std::to_string(sample_rate)+" -i \""+output_path+"\" \""+
-		wav_output_path+"\" && del \""+output_path+'"').c_str());
+	// Convert the raw PCM to WAV using FFMPEG.
+	const std::wstring parameters{Utilities::utf8_to_utf16("-nostats -hide_banner "
+		"-loglevel panic -y -f s"+std::to_string(bit_depth)+"le -ac "+std::to_string(
+		channel_count)+" -ar "+std::to_string(sample_rate)+" -i \""+output_path+"\" \""+
+		wav_output_path+'"')};
+
+	wchar_t* converted_parameters{new wchar_t[parameters.size()+1]};
+	for(int index{}; index < parameters.size(); ++index)
+		converted_parameters[index] = parameters[index];
+	converted_parameters[parameters.size()] = '\0';
+
+	STARTUPINFO startup_information{sizeof(STARTUPINFO)};
+	startup_information.cb = sizeof(startup_information);
+
+   PROCESS_INFORMATION process_information;
+
+	if(CreateProcess(L"ffmpeg.exe", converted_parameters, NULL, NULL, FALSE, NULL,
+		NULL, NULL, &startup_information, &process_information))
+	{
+		WaitForSingleObject(process_information.hProcess, INFINITE);
+		CloseHandle(process_information.hProcess);
+		CloseHandle(process_information.hThread);
+	}
+
+	else throw std::runtime_error{"Failed to launch FFMPEG."};
+
+	// Delete the raw PCM file.
+	delete[] converted_parameters;
+	std::filesystem::remove(output_path);
 }
 
 
